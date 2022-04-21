@@ -1,10 +1,10 @@
 # TALON: Techonology-Agnostic Long Read Analysis Pipeline
 # Author: Dana Wyman
 # -----------------------------------------------------------------------------
-# This program reads in SAM-formatted long read alignments and adds a custom 
+# This program reads in SAM-formatted long read alignments and adds a custom
 # tag to reflect the fraction of As in the sequence immediately following the
-# alignment. This can help indicate the likelihood of an internal priming 
-# artifact. 
+# alignment. This can help indicate the likelihood of an internal priming
+# artifact.
 
 from pathlib import Path
 import pyfaidx
@@ -131,7 +131,7 @@ def compute_frac_as_after_transcript(chrom: str, transcript_end: int, strand: st
     # Get fraction As in sequence
     return compute_frac_As(range_seq)
 
-  
+
 def split_reads_by_chrom(sam_file, tmp_dir = "tmp_label_reads", n_threads = 1):
     """ Reads a SAM/BAM file and splits the reads into one file per chromosome.
         Returns a list of the resulting filenames."""
@@ -216,7 +216,7 @@ def run_chrom_thread(sam_file, options):
             if location_str in pos_seen_fracA:
                 frac_As = pos_seen_fracA[location_str]
             else:
-                frac_As = compute_frac_as_after_transcript(chrom, transcript_end, 
+                frac_As = compute_frac_as_after_transcript(chrom, transcript_end,
                                                            strand,
                                                            options.fracA_range_size,
                                                            genome)
@@ -278,7 +278,7 @@ def main(options=None):
             shutil.rmtree(tmp_dir)
 
         # Partition reads by chromosome
-        read_files = split_reads_by_chrom(options.sam_file, tmp_dir = options.tmp_dir, 
+        read_files = split_reads_by_chrom(options.sam_file, tmp_dir = options.tmp_dir,
                                           n_threads = options.threads)
 
         # Now launch the parallel TALON read label jobs
