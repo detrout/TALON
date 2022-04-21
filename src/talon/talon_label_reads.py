@@ -6,8 +6,10 @@
 # alignment. This can help indicate the likelihood of an internal priming 
 # artifact. 
 
+from pathlib import Path
 import pyfaidx
 import pysam
+import shutil
 import multiprocessing as mp
 from datetime import datetime, timedelta
 import time
@@ -137,33 +139,34 @@ def split_reads_by_chrom(sam_file, tmp_dir = "tmp_label_reads", n_threads = 1):
     ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
     print("[ %s ] Splitting SAM by chromosome..." % (ts))
 
-    tmp_dir = tmp_dir + "/raw"
-    os.system("mkdir -p %s" %(tmp_dir))
+    tmp_dir = Path(tmp_dir) / "raw"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    if sam_file.endswith(".sam"):
+    sam_file = Path(sam_file)
+    if sam_file.suffix == ".sam":
         # Convert to bam
         ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
         print("[ %s ] -----Converting to bam...." % (ts))
-        bam_file = tmp_dir + "/all_reads.bam"
-        pysam.view("-b", "-S", "-@", str(n_threads), "-o", bam_file, sam_file, 
+        bam_file = tmp_dir / "all_reads.bam"
+        pysam.view("-b", "-S", "-@", str(n_threads), "-o", str(bam_file), str(sam_file),
                    catch_stdout=False)
-    elif sam_file.endswith(".bam"):
+    elif sam_file.suffix == ".bam":
         bam_file = sam_file
     else:
         raise ValueError("Please provide a .sam or .bam file")
 
     # Index the file if no index exists
-    if not os.path.isfile(bam_file + ".bai"):
+    if not bam_file.with_suffix(".bam.bai").is_file():
         ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
         print("[ %s ] -----Sorting and indexing..." % (ts))
-        sorted_bam = tmp_dir + "/all_reads.sorted.bam"
-        pysam.sort("-@", str(n_threads), "-o", sorted_bam, bam_file)
+        sorted_bam = tmp_dir / "all_reads.sorted.bam"
+        pysam.sort("-@", str(n_threads), "-o", str(sorted_bam), str(bam_file))
         bam_file = sorted_bam
-        pysam.index(bam_file)
+        pysam.index(str(bam_file))
         
     # Open bam file
-    tmp_dir += "/chroms"
-    os.system("mkdir -p %s" %(tmp_dir))
+    tmp_dir = tmp_dir / "chroms"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     read_files = []
     ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
     print("[ %s ] -----Writing chrom files..." % (ts))
@@ -173,8 +176,8 @@ def split_reads_by_chrom(sam_file, tmp_dir = "tmp_label_reads", n_threads = 1):
                         if x.mapped > 0 ]
         for chrom in chromosomes:
            records = bam.fetch(chrom)
-           fname = tmp_dir + "/" + chrom + ".sam"
-           with pysam.AlignmentFile(fname, "w", template = bam) as o: 
+           fname = tmp_dir / (chrom + ".sam")
+           with pysam.AlignmentFile(fname, "w", template=bam) as o:
                for record in records:
                    o.write(record)
            read_files.append(fname)
@@ -184,13 +187,15 @@ def split_reads_by_chrom(sam_file, tmp_dir = "tmp_label_reads", n_threads = 1):
 
 def run_chrom_thread(sam_file, options):
     """ """
-    outname = sam_file.split("/")[-1].split(".sam")[0]
+    sam_file = Path(sam_file)
+    outname = sam_file.stem
     genome = pyfaidx.Fasta(options.genome_file, sequence_always_upper=True,
                            one_based_attributes=False)
 
-    os.system("mkdir -p %s" % (options.tmp_dir + "/labeled")) 
-    out_log_fname = options.tmp_dir + "/labeled/" + outname + "_read_labels.tsv"
-    out_sam_fname = options.tmp_dir + "/labeled/" + outname + ".sam"
+    labeled_dir = Path(options.tmp_dir) / "labeled"
+    labeled_dir.mkdir(parents=True, exist_ok=True)
+    out_log_fname = labeled_dir / (outname + "_read_labels.tsv")
+    out_sam_fname = labeled_dir / (outname + ".sam")
 
     # Iterate over reads
     out_log = open(out_log_fname, 'w')
@@ -234,25 +239,27 @@ def pool_outputs(indir, outprefix):
         concatenate them to form the final output. """
 
     sam_fname = outprefix + "_labeled.sam"
-    log_fname = outprefix + "_read_labels.tsv" 
-    
+    log_fname = outprefix + "_read_labels.tsv"
+
     # Get list of files to combine
-    sam_files = glob.glob(indir + "/*.sam")
-    log_files = glob.glob(indir + "/*_read_labels.tsv")
+    sam_files = list(Path(indir).glob("*.sam"))
+    log_files = list(Path(indir).glob("*_read_labels.tsv"))
 
-    # Add headers
-    with open(log_fname, 'w') as f:
-        f.write("\t".join(["read_name", "fraction_As"]) + '\n')
+    first_sam = True
+    with open(sam_fname, "wt") as outsam:
+        for sam in sam_files:
+            with open(sam, "rt") as insam:
+                for line in insam:
+                    # copy the first header
+                    if first_sam or not line.startswith("@"):
+                        outsam.write(line)
+            first_sam = False
 
-    os.system('cp %s %s' % (sam_files[0], sam_fname))
-
-    # Concatenate 
-    for sam in sam_files[1:]:
-        os.system('grep -v "^@" %s >> %s' % (sam, sam_fname))
-
-    for logfile in log_files:
-        os.system('cat %s >> %s' % (logfile, log_fname))
-
+    with open(log_fname, "wt") as outlog:
+        outlog.write("\t".join(["read_name", "fraction_As"]) + '\n')
+        for logfile in log_files:
+            with open(logfile, "rt") as inlog:
+                shutil.copyfileobj(inlog, outlog)
     return
 
 def main(options=None):
@@ -266,8 +273,9 @@ def main(options=None):
         print("[ %s ] Started talon_label_reads run." % (ts))
 
         # Remove tmp dir if it exists
-        if os.path.exists(options.tmp_dir):
-            os.system("rm -r %s" % (options.tmp_dir))
+        tmp_dir = Path(options.tmp_dir)
+        if tmp_dir.is_dir():
+            shutil.rmtree(tmp_dir)
 
         # Partition reads by chromosome
         read_files = split_reads_by_chrom(options.sam_file, tmp_dir = options.tmp_dir, 
@@ -285,15 +293,15 @@ def main(options=None):
     # Pool together output files
     ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
     print("[ %s ] Pooling output files..." % (ts))
-    pool_outputs(options.tmp_dir + "/labeled", options.outprefix)
+    pool_outputs(tmp_dir / "labeled", options.outprefix)
 
     # Delete tmp_dir if desired
     if options.delete_tmp:
-        os.system("rm -r %s" % (options.tmp_dir))
- 
+        shutil.rmtree(tmp_dir)
+
     ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
     print("[ %s ] Run complete" % (ts))
 
 if __name__ == '__main__':
     options = get_options()
-    main(options) 
+    main(options)
