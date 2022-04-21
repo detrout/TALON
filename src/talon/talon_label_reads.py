@@ -204,7 +204,7 @@ def run_chrom_thread(sam_file, options):
         out_sam = pysam.AlignmentFile(out_sam_fname, "w", template=sam)
 
         for record in sam:  # type: pysam.AlignedSegment
-            if record.is_secondary == True or record.is_unmapped == True:
+            if record.is_secondary is True or record.is_unmapped is True:
                 continue
             read_id = record.query_name
             chrom = record.reference_name
@@ -263,7 +263,7 @@ def pool_outputs(indir, outprefix):
     return
 
 def main(options=None):
-    if options == None:
+    if options is None:
         options = get_options()
 
     # Initialize worker pool
